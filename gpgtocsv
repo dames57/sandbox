@@ -1,0 +1,162 @@
+#!/bin/sh
+
+#A script used by me to dump folders of pass (www.passwordstore.org) password 
+#files (PGP encrypted text files) into a CSV for importation into Keepass.
+
+#Recurses through a given directory and finds all all files suffixed with gpg. 
+##Decrypts each file and makes each line of a file as a field of a row in a 
+#single csv file saved to the same base directory of the PGP encrypted files. 
+
+#we expect the data in the decrypted files to be organised like a multiline 
+#pass password, for example:
+
+#row 1: password
+#row 2: Title: the title
+#row 3: Username: the username
+#row 4: URL: the link to login to the service
+#row 5: empty
+#row 6: notes
+
+#What you should take from this is that from rows 1-4 the program will treat 
+#each row of data as a field in the CSV, and that from row 5 onwards all 
+#following lines (which are expected to be notes) will be combined as the one 
+#field but separated by new lines.
+
+csvcolumnheaders="\"Group\",\"Password\",\"Title\",\"Username\",\"URL\",\"Notes\""
+
+#the first argument should be the full path to the folder we'd like to search 
+#for:
+
+pathgpgfolder="$1"
+
+if [ -z "$pathgpgfolder" ];then
+	printf "%s\n" "Enter the full path of the folder with the gpg files you'd like to decrypt."
+	exit 1
+fi
+
+if [ ! -d "$pathgpgfolder" ];then
+	printf "%s\n" "The directory does not exist."
+	exit 1
+fi
+
+#the name of the directory will become the name of our csv 
+#file
+dirname=$(basename "$pathgpgfolder")
+csvname="$dirname"
+
+#use find to get a temporary list of files suffixed with .gpg
+#create a temporary file
+gpgfiles=$(mktemp)
+
+find "$pathgpgfolder" -name "*.gpg" > "$gpgfiles"
+
+#check if we've found any files suffixed with gpg
+if [ ! -s "$pathgpgfolder" ];then
+	printf "%s\n" "No files suffixed with .gpg in that folder. Stopping now"
+	exit 1
+fi
+
+#the first line of the csv file will be the descriptive column titles
+printf "%s\n" "$csvcolumnheaders" > "$pathgpgfolder/$csvname.csv"
+
+
+#make temporary file to store decrypted data
+decrypted=$(mktemp)
+
+#convert gpg to csv using our list of files
+while read path; do
+	gpg -dq "$path" > "$decrypted"
+
+	#the first field of each row is expected to be the group name. we'll get this 
+	#from the folder name of the file path.
+	groupname=$(basename $(dirname "$path"))
+
+  if [ -z "$groupname" ];then
+		printf "%s/n" "Something has gone wrong. Stopping"
+		exit 1
+	fi
+	
+	printf "%s" "\"$groupname\"," >> "$pathgpgfolder/$csvname.csv"
+
+	#process lines in file as fields of a csv
+	#we'll keep a track of which line we're up to in the file we're processing
+	count=1
+	#number of lines in file
+  lines=$(wc -l "$decrypted" | cut -d" " -f1)	
+
+	#we'll make a temporary file to store lines five and up for later processing
+	notes=$(mktemp)
+
+	while read row; do
+		#from row five onwards all following rows are added onto the same field 
+		#with new lines separating them.
+		if [ $count -ge 5 ];then
+
+			#we add all the following lines within a single comma separated field
+			#we'll read the lines to a temporary file for later processing
+
+			#check whether we're at the last line or not
+			if [ $count -eq $lines ];then
+				#don't add trailing new line as we're at the last column of the row
+				printf "%s" "$row" |  sed 's/"/""/g' >> "$notes"
+			else
+				#add each row as a new line separated value within the same field
+				printf "%s\n" "$row" |  sed 's/"/""/g'>> "$notes"
+			fi
+
+		else
+		#we're at rows 1,2,3 or 4 so add the contents of each row as a separate 
+		#(comma separated) field
+		#check if we're at the last line
+			if [ $count -eq $lines ];then
+				#don't add trailing comma or a new line (the default awk record 
+				#separator)
+			  printf "%s" "$row" |  sed 's/"/""/g' | awk -v ORS="" '{print "\""$0"\""}' >> "$pathgpgfolder/$csvname.csv"
+			else
+				#we're not at the last field so add trailing comma
+			  printf "%s" "$row" |  sed 's/"/""/g'| awk -v ORS=, '{print "\""$0"\""}' >> "$pathgpgfolder/$csvname.csv"
+			fi
+		fi
+		count=$(expr $count + 1) 
+	done <"$decrypted"
+
+	#check if there are any notes to process before moving onto the next file
+	if [ -s "$notes" ];then
+		#yep, there are
+		#add a double quote to begin the comma separated field
+		printf "\"" "$notes" >> "$pathgpgfolder/$csvname.csv"
+
+		#append the notes to last row of the csv file
+		cat "$notes" >> "$pathgpgfolder/$csvname.csv"
+
+		#add a double quote to end the comma separated field
+		printf "\"" "$notes" >> "$pathgpgfolder/$csvname.csv"
+	fi
+
+	#append new line to end of row to begin next record
+	echo "" >> "$pathgpgfolder/$csvname.csv" 
+
+	#gpg -dq "$path" | sed 's/"/""/g' | awk -vORS=, 'NF {print "\""$0"\""}' | sed 
+	#'s/,$/\n/' >> "$pathgpgfolder/$csvname.csv"
+	
+	#clean up
+	rm "$notes"
+done <"$gpgfiles"
+
+#clean up temporary files
+rm "$gpgfiles"
+rm "$decrypted"
+
+#Disambiguating some important commands in this script:
+#------------------------------------------------------
+#what each line of the above command does:
+#`sed 's/"/"" /g'` escapes double quotes with double quotes
+#`awk -v ORS=,` sets the output record separator to `,`
+#Likewise awk -v ORS="" sets the record separator to nothing. `awks` default ORS is a newline.
+#`NF` tells `awk` to only execute the print command when the number of fields is more than zero (line is not empty).
+#`{print $0}` tells `awk` to print all fields for each record (line)
+#likewise, `{print $2}` would have `awk` to print the second field for each record.
+#`sed 's/,$/\n/'` just gets rid of the trailing `,` and turns it into a new line.
+
+
+
