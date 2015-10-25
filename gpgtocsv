@@ -7,7 +7,7 @@
 ##Decrypts each file and makes each line of a file as a field of a row in a 
 #single csv file saved to the same base directory of the PGP encrypted files. 
 
-#we expect the data in the decrypted files to be organised like a multiline 
+#We expect the data in the decrypted files to be organised like a multi-line 
 #pass password, for example:
 
 #row 1: password
@@ -44,13 +44,13 @@ fi
 dirname=$(basename "$pathgpgfolder")
 csvname="$dirname"
 
-#use find to get a temporary list of files suffixed with .gpg
-#create a temporary file
+#Use find to get a temporary list of files suffixed with .gpg
+#create a temporary file for us to store the list of .gpg suffixed files
 gpgfiles=$(mktemp)
 
 find "$pathgpgfolder" -name "*.gpg" > "$gpgfiles"
 
-#check if we've found any files suffixed with gpg
+#check if we've found any files suffixed with .gpg
 if [ ! -s "$pathgpgfolder" ];then
 	printf "%s\n" "No files suffixed with .gpg in that folder. Stopping now"
 	exit 1
@@ -148,7 +148,10 @@ rm "$gpgfiles"
 rm "$decrypted"
 
 #Disambiguating some important commands in this script:
-#------------------------------------------------------
+#Thanks to Dan Fego <http://stackoverflow.com/users/34426/dan-fego> on 
+#stackoverflow.com for his post <http://stackoverflow.com/a/8714446> with this 
+#information
+# ------------------------------------------------------
 #what each line of the above command does:
 #`sed 's/"/"" /g'` escapes double quotes with double quotes
 #`awk -v ORS=,` sets the output record separator to `,`
@@ -157,6 +160,4 @@ rm "$decrypted"
 #`{print $0}` tells `awk` to print all fields for each record (line)
 #likewise, `{print $2}` would have `awk` to print the second field for each record.
 #`sed 's/,$/\n/'` just gets rid of the trailing `,` and turns it into a new line.
-
-
 
